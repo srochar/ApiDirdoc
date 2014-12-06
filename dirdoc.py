@@ -10,28 +10,11 @@ import re
 import logging
 import urlparse
 
-# create logger
-logger = logging.getLogger('Dirdoc API')
-logger.setLevel(logging.DEBUG)
-
-# create console handler and set level to debug
-ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
-
-# create formatterencode(self.__encoding)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-# add formatter to ch
-ch.setFormatter(formatter)
-
-# add ch to logger
-logger.addHandler(ch)
-
 class Dirdoc():
 
     def __requestpost(self,url):
         write = "Post URL = {0}".format(url)
-        logger.info(write)
+        self.logger.info(write)
         req = requests.post(url,data=self.__logindata,headers=self.__headers)
         self.__cookies = req.cookies
         html = BeautifulSoup(req.text)
@@ -40,7 +23,7 @@ class Dirdoc():
 
     def __requestget(self,url):
         write = "Get URL = {0}".format(url)
-        logger.info(write)
+        self.logger.info(write)
         req = requests.get(url,cookies=self.__cookies,headers=self.__headers)
         html = BeautifulSoup(req.text)
         return html
@@ -49,10 +32,10 @@ class Dirdoc():
         url = self.__loginurl
         html = self.__requestpost(url)
         if "Bienvenido" not in html.text:
-            logger.error("al realizar Login, password y/o rut")
+            self.logger.error("al realizar Login, password y/o rut")
             login = False
         else:
-            logger.info("Login Correcto!")
+            self.logger.info("Login Correcto!")
             login = True
         return login
         
@@ -119,16 +102,25 @@ class Dirdoc():
 
     def __getPlanCarrera(self,malla):
         plan = None
-        #plan = int(malla.select("html body table.pequena tr")[5].select("td")[1].text)
+        plan = int(malla.select("html body table.pequena tr")[5].select("td")[1].text)
         return plan
 
     def __getMalla(self,link_malla):
         url = self.__link_malla.format(link_malla)
         html = self.__requestget(url)
-        #logger.debug("html = {0}".format(html))
-        avance = {}
-        avance['plan'] = self.__getPlanCarrera(html)
-        #logger.debug("info table = {0}".format(html.select("html body")))
+        avance = []
+        #avance['plan'] = self.__getPlanCarrera(html)
+        todos_ramos = html.select("tr")[7:]
+        info_tab = html.select("tr")[6].select("th")
+        ramos = [ l.select("td") for l in todos_ramos ]
+        #self.logger.info('info_tab = {0}'.format(info_tab))
+        #self.logger.info("ramos = {0}".format(ramos))
+        for ramo in ramos:
+            l = {}
+            for i,info in enumerate(info_tab):
+                if len(ramo) is 7:
+                    l[info.text] = ramo[i].text
+            avance.append(l)
 
         return avance
     
@@ -167,13 +159,18 @@ class Dirdoc():
                 res[info] = dat[i]
             resultados.append(res)
         return resultados
+
+    def __logout(self):
+        url = self.__logouturl
+        html = self.__requestpost(url)
+
     
-    def __init__(self,rut,password,cache = 100):
+    def __init__(self,rut,password,cache = 100,debug=False):
+        self.debug = debug
         self.__loginurl = "http://postulacion.utem.cl/valida.php"
+        self.__logouturl = "http://postulacion.utem.cl/alumnos/desconexion.php"
         self.rut = rut
         self.info = {}
-        self.__link_actual = []
-        self.__link_antiguos = []
         self.__encoding = 'utf-8'
         self.__urls = dict(
             ramos_actual = 'http://postulacion.utem.cl/alumnos/notas.php', # Muestra los ramos tomados por el estudiante
@@ -184,7 +181,7 @@ class Dirdoc():
             resultado = 'http://postulacion.utem.cl/inscripcion/resultado',
         )
         self.__link_nota = "http://postulacion.utem.cl/curricular/notas/{0}"
-        self.__link_malla = "http://postulacion.utem.cl/alumnos/avance_malla_ci.php?{0}"#esta url ya no se usa pero me alimento de ella
+        self.__link_malla = "http://postulacion.utem.cl/curricular/avance?{0}"#esta url ya no se usa pero me alimento de ella
         self.__htmls = {}
         self.__encoding = 'utf-8'
         self.__logindata = dict(
@@ -193,8 +190,17 @@ class Dirdoc():
             tipo = 0 # El tipo de usuario es 0 para el estudiante
         )
         self.__headers = {'User-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.7; rv:21.0) Gecko/20100101 Firefox/21.0'}
+        #Logger
+        self.logger = logging.getLogger('Dirdoc API')
+        self.logger.setLevel(logging.DEBUG)
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        ch.setFormatter(formatter)
+        self.logger.addHandler(ch)
+
         if self.__login():
-            logger.info("Obteniendo informacion")
+            self.logger.info("Obteniendo informacion")
             
             for tupl in self.__urls.items():
                 key,url = tupl[0],tupl[1]
@@ -206,6 +212,8 @@ class Dirdoc():
             self.info['ramos_ant'] = self.__getRamos(self.__htmls['ramos_ant'])
             self.info['carreras'] = self.__getCarreras()
             self.info['resultado'] = self.__getResultadoIns()
+
+            self.__logout()
                 
         else:
             pass
