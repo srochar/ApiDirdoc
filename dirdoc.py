@@ -10,30 +10,32 @@ import re
 import logging
 import urlparse
 
-
-def parseNota(nota):
-    nota = nota.text.replace(',','.')
-    try:
-        nota = float(nota)
-    except:
-        nota = None
-    return nota
-
-def parsePorcentaje(porcentaje):
-    porcentaje = porcentaje.text.encode('utf-8').strip()
-    porcentaje = ''.join(porcentaje.split())
-    return porcentaje
-
-def parseNotaoText(row):
-    text = row.text.replace(',','.')
-    try:
-        result = float(text)
-    except:
-        result = text
-    return result
+from resultadosInscripciones import ResultadoInscripcion
+from informacion import Informacion
+from Carreras import Carrera
+from AnvanceMalla import  AvanceMalla
+from Ramo import Ramo
+import jsonpickle
 
 
 class Dirdoc():
+
+    def __parseText(self,data):
+        result = data.text.encode(self.__encoding)
+        if result == '':
+            result = None
+        else:
+            try:
+                result = int(result)
+            except:
+                if result.find(',') is 1:
+                    result = result.replace(',','.')
+                    try:
+                        result = float(result)
+                    except:
+                        result = result.rstrip()
+
+        return result
 
     def __requestpost(self,url):
         write = "Post URL = {0}".format(url)
@@ -50,26 +52,6 @@ class Dirdoc():
         req = requests.get(url,cookies=self.__cookies,headers=self.__headers)
         html = BeautifulSoup(req.text)
         return html
-
-
-    def __parseramo(self,ramo):
-        reg_exp_link = r'(?<=p2=)\d+'
-        ramo = ramo.select("td")
-        if ramo[6].a.get('onclick') > 0:
-            id_link = int(re.findall(reg_exp_link, ramo[6].a.get('onclick'))[0])
-        else:
-            id_link = int(ramo[6].a.get("href").split("/")[-1])
-        info_ramo = dict(
-            id_ramo = self.__getIdramo(ramo),
-            nombre = ramo[1].text,
-            profesor = ramo[2].text,
-            seccion = int(ramo[3].text),
-            estado = ramo[4].text,
-            nota_final= parseNota(ramo[5]),
-            id_link = id_link,
-            notas = self.__getRamo(id_link)
-        )
-        return info_ramo
     
     def __login(self):
         url = self.__loginurl
@@ -77,7 +59,7 @@ class Dirdoc():
         if "Bienvenido" in html.text:
             self.logger.info("Autentificacion Correcta")
             login = True
-        elif "Base de datos":
+        elif "Base de datos" in html.text:
             self.logger.info("Base de datos de Dirdoc Bajada")
             login = False
         else:
@@ -85,19 +67,16 @@ class Dirdoc():
             login = False
         return login
         
-    def __repr__(self):
-        return "API Dirdoc rut = {0}".format(self.rut)
-        
     def __getInfo(self):
         html = self.__htmls['info']
-        info = html.select("html body table.pequena tr.centro td")
-        datos = dict(
-            rut = info[0].text,
-            nombre = info[1].text,
-            estado = info[2].text,
-            carrera = info[3].text
+        data = html.select("html body table.pequena tr.centro td")
+        info_table = ['rut','nombre','estado','carrera']
+        info_data = map(self.__parseText,data)
+        return Informacion(
+            dict(
+                zip(info_table,info_data)
+            )
         )
-        return datos
         
     def __getIdramo(self,ramo):
         id_ramo = ramo[0].text#.encode(self.__encoding)
@@ -106,11 +85,44 @@ class Dirdoc():
         if len(unicode(id_ramo.split('\n'))) > 0:
             id_ramo.replace('\n','').replace('\r','')
         return id_ramo
+
+    def __parseRamo(self,ramo):
+        reg_exp_link = r'(?<=p2=)\d+'
+        ramo = ramo.select("td")
+        if ramo[6].a.get('onclick') > 0:
+            id_link = int(re.findall(reg_exp_link, ramo[6].a.get('onclick'))[0])
+        else:
+            id_link = int(ramo[6].a.get("href").split("/")[-1])
+        table = ['nombre','profesor','seccion','estado','nota_final','id_link']
+        info = map(self.__parseText,ramo)[1:]
+        info_ramo = dict(
+            #id_ramo = self.__getIdramo(ramo),
+            #nombre = ramo[1].text.encode(self.__encoding),
+            #profesor = ramo[2].text.encode(self.__encoding),
+            #seccion = int(ramo[3].text),
+            #estado = ramo[4].text.encode(self.__encoding),
+            #nota_final= parseNota(ramo[5]),
+            #id_link = id_link,
+            #notas = self.__getRamo(id_link)
+            zip(table,info),
+            id_ramo = self.__getIdramo(ramo),
+            notas = self.__getRamo(id_link)
+
+        )
+        return info_ramo
     
     def __getRamos(self,html):
         ramos = html.select("html body table.pequena tr")[3:]
 
-        todos_ramos = map(self.__parseramo,ramos)
+        todos_ramos = [
+            Ramo(
+                dict(
+                    self.__parseRamo(ramo)
+                )
+            )for ramo in ramos
+        ]
+
+            #map(self.__parseramo,ramos)
 
         return todos_ramos
 
@@ -121,8 +133,8 @@ class Dirdoc():
         tables = html.select("html body table.pequena tr")[4:]
         fila_porcentajes = tables[0].select("th")
         fila_notas = tables[1].select('th')
-        notas = map(parseNota,fila_notas)
-        porcentajes = map(parsePorcentaje,fila_porcentajes)
+        notas = map(self.__parseText,fila_notas)
+        porcentajes = map(self.__parseText,fila_porcentajes)
         list_notas = [
             dict(
                 nota = nota,
@@ -141,16 +153,23 @@ class Dirdoc():
         plan = int(malla.select("html body table.pequena tr")[5].select("td")[1].text)
         return plan
 
+    def __parseAsignaturaMalla(self,asignatura):
+        asignatura = asignatura.select('td')
+        return map(self.__parseText,asignatura)
+
     def __getMalla(self,link_malla):
         url = self.__link_malla.format(link_malla)
         html = self.__requestget(url)
-        info_table = [r.text for r in html.select("tr")[6].select("th")] #informacion de la tabla
+        #info_table = [r.text for r in html.select("tr")[6].select("th")] #informacion de la tabla
+        info_table = ['nivel','asignatura','tipo','op','estado','seccion','nota']
         asignatura = [asig for asig in  html.select("tr")[7:] if len(asig.select("td")) == 7 ] #todas las asignaturas
 
 
         avance = [
-            dict(
-                zip(info_table,map(parseNotaoText,asig.select('td')))
+            AvanceMalla(
+                dict(
+                    zip(info_table,self.__parseAsignaturaMalla(asig))
+                )
             ) for asig in asignatura
         ]
         #self.logger.info("AVANCE = {0}".format(avance))
@@ -161,38 +180,42 @@ class Dirdoc():
         carrera = carrera.select("td")[0]
         link_malla = self.__getLinkCarrera(carrera)
         return self.__getMalla(link_malla)
-        
+
+    def __parseInfoCarrera(self,carrera):
+        carrera = carrera.select('td')
+        return map(self.__parseText,carrera)
 
     def __getCarreras(self):
         html = self.__htmls['carreras']
-        info_table = [row.text for row in html.select("html body table.pequena")[1].select("tr")[0].select("th")]#info de la tabla
-        #info_table = |carrera| estado| semestre ingreso | semestre termino
         carreras = html.select("html body table.pequena")[1].select("tr")[1:]#todas las carreras
-
-        carreras = [
-            dict(
-                zip(info_table, [c.text for c in carrera.select("td")]), #Informacion basica como Nombre carrera, estado, Semestre Ingreso, Semestre termino
-                Avance =  self.__getAvance(carrera) #Obtiene el avance de esa carrera
-            )   for carrera in carreras
+        info_table = ['carrera','estado','semestreIngreso','semestreTermino']
+        return [
+           Carrera(
+               dict(
+                   zip(info_table,self.__parseInfoCarrera(carrera)),
+                   avance = self.__getAvance(carrera)
+               )) for carrera in carreras
         ]
-        #self.logger.info("Carreras: {0}".format(carreras))
-        return carreras
+
+
+    def __parseResultado(self,ramo):
+        ramo = ramo.select('td')
+        return map(self.__parseText,ramo)
 
     def __getResultadoInscritos(self):
         html = self.__htmls['resultado']
-        info_table = [i.text for i in html.select("html body table.pequena")[1].select("tr.titulo_fila th")]
+
+        info_table = ['codigo','nombreAsignatura','seccion','estado','horario']
         ramos = html.select("html body table.pequena")[1].select("tr.centro")
 
-        #self.logger.info("Ramos: {0}".format(ramos))
-        #self.logger.info("info_table: {0}".format(info_table))
-
         resultados = [
-            dict(
-                zip(info_table,map(parseNotaoText,ramo.select('td')) )
-            )for ramo in ramos
+            ResultadoInscripcion(dict(
+                zip(info_table,self.__parseResultado(ramo))
+            ))  for ramo in ramos
         ]
 
         return resultados
+
 
     def __logout(self):
         url = self.__logouturl
@@ -238,17 +261,41 @@ class Dirdoc():
             for key,url in self.__urls.items():
                 self.__htmls[key] = self.__requestget(url)
 
-            self.parse = dict(
-                info = self.__getInfo(),
-                ramos_actual = self.__getRamos(self.__htmls['ramos_actual']),
-                ramos_anterior = self.__getRamos(self.__htmls['ramos_anterior']),
-                carreras = self.__getCarreras(),
-                resultado = self.__getResultadoInscritos()
-            )
 
+            self.ramos_anterior = self.__getRamos(self.__htmls['ramos_anterior'])
+            self.info = self.__getInfo()
+            self.ramos_actual = self.__getRamos(self.__htmls['ramos_actual'])
+            self.carreras = self.__getCarreras()
+            self.resultado = self.__getResultadoInscritos()
 
             self.__logout()
                 
         else:
-            pass
+            self.ramos_anterior = self.info = self.ramos_actual = self.carreras = self.resultado = None
 
+
+    def to_JSON(self):
+        return jsonpickle.encode(
+            (
+                dict(
+                    ramos_anterior = self.ramos_anterior,
+                    info = self.info,
+                    ramos_actual = self.ramos_actual,
+                    carreras = self.carreras,
+                    resultado = self.resultado,
+                )
+            )
+        )
+
+
+    def __repr__(self):
+        return "API Dirdoc rut = {0}".format(self.rut)
+
+    def __str__(self):
+        return str(
+            'ramos_anterior: {0} , info: {1} , ramos_actual: {2} , '
+            'carreras: {3} , resultado: {4}'.format(
+                self.ramos_anterior,self.info,
+                self.ramos_actual,self.carreras,
+                self.resultado)
+        )

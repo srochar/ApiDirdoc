@@ -5,5 +5,6 @@ Werkzeug==0.9.6
 argparse==1.2.1
 beautifulsoup4==4.3.2
 itsdangerous==0.24
+jsonpickle==0.8.0
 requests==2.5.0
 wsgiref==0.1.2
