@@ -16,7 +16,7 @@ from Carreras import Carrera
 from AnvanceMalla import  AvanceMalla
 from Ramo import Ramo
 import jsonpickle
-
+from Nota import Nota,NotaEstable,NotasParciales
 
 class Dirdoc():
 
@@ -37,9 +37,15 @@ class Dirdoc():
 
         return result
 
+    def __loggerInfo(self,write):
+        if self.loggerinfo is True:
+            self.logger.info(write)
+        else:
+            pass
+
     def __requestpost(self,url):
         write = "Post URL = {0}".format(url)
-        self.logger.info(write)
+        self.__loggerInfo(write)
         req = requests.post(url,data=self.__logindata,headers=self.__headers)
         self.__cookies = req.cookies
         html = BeautifulSoup(req.text)
@@ -48,7 +54,7 @@ class Dirdoc():
 
     def __requestget(self,url):
         write = "Get URL = {0}".format(url)
-        self.logger.info(write)
+        self.__loggerInfo(write)
         req = requests.get(url,cookies=self.__cookies,headers=self.__headers)
         html = BeautifulSoup(req.text)
         return html
@@ -57,14 +63,15 @@ class Dirdoc():
         url = self.__loginurl
         html = self.__requestpost(url)
         if "Bienvenido" in html.text:
-            self.logger.info("Autentificacion Correcta")
+            write = "Autentificacion Correcta"
             login = True
         elif "Base de datos" in html.text:
-            self.logger.info("Base de datos de Dirdoc Bajada")
+            write = "Base de datos de Dirdoc Bajada"
             login = False
         else:
-            self.logger.error("Usuario y/o contraseña incorrecta")
+            write = "Usuario y/o contraseña incorrecta"
             login = False
+        self.__loggerInfo(write)
         return login
         
     def __getInfo(self):
@@ -80,7 +87,7 @@ class Dirdoc():
         
     def __getIdramo(self,ramo):
         id_ramo = ramo[0].text#.encode(self.__encoding)
-        #write = "id_ramo = {0}".format(id_ramo)
+        #write = "id_ramo = {0}".format(id_rself.logger.info(write)amo)
         #logger.debug(write)
         if len(unicode(id_ramo.split('\n'))) > 0:
             id_ramo.replace('\n','').replace('\r','')
@@ -135,12 +142,17 @@ class Dirdoc():
         fila_notas = tables[1].select('th')
         notas = map(self.__parseText,fila_notas)
         porcentajes = map(self.__parseText,fila_porcentajes)
+
         list_notas = [
-            dict(
+            Nota(dict(
                 nota = nota,
-                porcentaje = porcentaje
-            ) for nota,porcentaje in zip(notas,porcentajes)[:-2] ] #no me interesa los ultimos dos
-        return list_notas
+                porcentaje = int(re.findall(r'\d+',porcentaje)[0])
+            )) for nota,porcentaje in zip(notas,porcentajes)[:-6]
+        ]
+        notas_representativas = notas[-6:-2] #nota_presentacion,examen1,examen2,notafinal
+
+        n = NotasParciales(list_notas,*notas_representativas)
+        return n
 
     def __getLinkCarrera(self,datos):
         link_carrera = datos.a.get("href")
@@ -222,8 +234,9 @@ class Dirdoc():
         html = self.__requestpost(url)
 
     
-    def __init__(self,rut,password,cache = 100,debug=False):
+    def __init__(self,rut,password,cache = 100,loggerinfo = False,debug=False):
         self.debug = debug
+        self.loggerinfo = False
         self.__loginurl = "http://postulacion.utem.cl/valida.php"
         self.__logouturl = "http://postulacion.utem.cl/alumnos/desconexion.php"
         self.rut = rut
@@ -256,7 +269,8 @@ class Dirdoc():
 
         self.__htmls = {}
         if self.__login():
-            self.logger.info("Obteniendo informacion")
+            write = "Obteniendo informacion"
+            self.__loggerInfo(write)
             
             for key,url in self.__urls.items():
                 self.__htmls[key] = self.__requestget(url)

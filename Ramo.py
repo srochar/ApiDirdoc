@@ -12,6 +12,7 @@ class Ramo:
         )
 
     def __repr__(self):
+
         return str(
             "ramo = {0} , nota_final = {1}".format(self.nombre,self.nota_final)
         )
